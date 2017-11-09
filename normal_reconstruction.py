@@ -168,8 +168,12 @@ def triangulate_azimuth(azimuth1, pose1, azimuth2, pose2):
 	'''
 	Calculates normal given azimuth and pose of two frames
 	'''
-	projection1 = np.array([math.cos(azimuth1), math.sin(azimuth1)]).transpose()
-	projection2 = np.array([math.cos(azimuth2), math.sin(azimuth2)]).transpose()
+	projection1 = np.resize([math.cos(azimuth1), math.sin(azimuth1), 0], (3,))
+	projection2 = np.resize([math.cos(azimuth2), math.sin(azimuth2), 0], (3,))
+
+	# transform to world frame
+	projection1 = pose1[:3, :3].dot(projection1)
+	projection2 = pose2[:3, :3].dot(projection2)
 
 	# the z axis of image plane
 	image_plane_normal1 = pose1[:3, 2]
@@ -180,7 +184,11 @@ def triangulate_azimuth(azimuth1, pose1, azimuth2, pose2):
 
 	point_normal = np.cross(cross1, cross2)
 
-	return point_normal
+	# make sure that the normal is in the right side
+	if np.dot(point_normal, pose1[:3, 2]) < 0:
+		point_normal *= -1
+
+	return point_normal/np.linalg.norm(point_normal)
 		
 def draw_point_cloud(pointcloud, event):
 	glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
