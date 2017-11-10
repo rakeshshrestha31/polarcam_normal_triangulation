@@ -47,15 +47,7 @@ def read_azimuth_img(path):
 	return array
 
 def list_to_transformation_pose(list_pose):
-	# R, t = (np.resize(list_pose[:9], (3,3)), list_pose[-4:-1])
-	# T = np.eye(4)
-	# T[:3, :3] = R
-	# T[:3, 3] = t
 	T = np.resize(list_pose, (4, 4))
-
-	# T[:3, :3] = R.transpose()
-	# T[:3, 3] = -R.transpose().dot(t)
-
 	return T
 
 def transform(T, p):
@@ -65,6 +57,11 @@ def transform(T, p):
 	'''
 	p_homogeneous = T.dot(np.resize(p+(1,), (4, 1)))
 	return tuple(p_homogeneous[:3].transpose()[0])
+
+def project_vector_to_plane(vector, plane_normal):
+	vector = np.resize(vector, (3,))
+	plane_normal = np.resize(plane_normal, (3,))
+	return vector - np.dot(vector.transpose(), plane_normal) * plane_normal
 
 def read_trajectory(path):
 	with open(path, 'r') as f:
@@ -112,6 +109,12 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 	pointcloud = []
 	normals = []
 
+	azimuth_img1_reprojected = np.zeros((height, width), dtype='f')
+	azimuth_img2_reprojected = np.zeros((height, width), dtype='f')
+
+	azimuth_img1_original = np.zeros((height, width), dtype='f')
+	azimuth_img2_original = np.zeros((height, width), dtype='f')
+
 	for row in range(0, depth_img1.shape[0], 10):
 		for col in range(0, depth_img1.shape[1], 10):
 			d1 = float(depth_img1[row, col])
@@ -146,10 +149,36 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 
 			normals.append(normal_start)
 			normals.append(normal_end)
+			pointcloud.append(xyz1)
 
-			pointcloud.append(xyz1)		
+			projection1 = (normal[0], normal[1], 0)
+			azimuth_img1_reprojected[row, col] = math.fabs(math.atan2(projection1[1], projection1[0])-math.pi)
+			azimuth_img1_original[row, col] = math.fabs(azimuth_img1[row, col]-math.pi)
+
+			projection2 = project_vector_to_plane(normal, T_12[:3, 2:3])
+			projection2 = T_21[:3, :3].dot(projection2)
+			azimuth_img2_reprojected[v, u] = math.fabs(math.atan2(projection2[1], projection2[0])-math.pi)
+			azimuth_img2_original[row, col] = math.fabs(azimuth_img2[row, col]-math.pi)
 			
 			num_overlap += 1
+
+	# cv2.imwrite(
+	# 	'original1.png', 
+	# 	cv2.applyColorMap(np.uint8(azimuth_img1_original/math.pi*255), cv2.COLORMAP_JET)
+	# )
+	# cv2.imwrite(
+	# 	'original2.png', 
+	# 	cv2.applyColorMap(np.uint8(azimuth_img2_original/math.pi*255), cv2.COLORMAP_JET)
+	# )
+	# cv2.imwrite(
+	# 	'reprojected1.png', 
+	# 	cv2.applyColorMap(np.uint8(azimuth_img1_reprojected/math.pi*255), cv2.COLORMAP_JET)
+	# )
+	# cv2.imwrite(
+	# 	'reprojected2.png', 
+	# 	cv2.applyColorMap(np.uint8(azimuth_img2_reprojected/math.pi*255), cv2.COLORMAP_JET)
+	# )
+
 	print num_overlap
 	return pointcloud, normals
 

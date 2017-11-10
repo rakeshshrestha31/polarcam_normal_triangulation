@@ -3,10 +3,8 @@ import numpy as np
 import random
 import math
 
-from normal_reconstruction import triangulate_azimuth, transform
+from normal_reconstruction import triangulate_azimuth, transform, project_vector_to_plane
     
-def project_vector_to_plane(vector, plane_normal):
-    return vector - np.dot(vector.transpose(), plane_normal) * plane_normal
 
 class TestNormalReconstruction(unittest.TestCase):
 
@@ -28,11 +26,11 @@ class TestNormalReconstruction(unittest.TestCase):
         normal = np.asarray([
             np.asarray([random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5)]) +
             pose1[:3, 2]
-        ]).reshape((3, 1))
+        ]).reshape((3,))
         normal /= np.linalg.norm(normal)
         
-        projection1 = project_vector_to_plane(normal, pose1[:3, 2:3])
-        projection2 = project_vector_to_plane(normal, pose2[:3, 2:3])
+        projection1 = project_vector_to_plane(normal, pose1[:3, 2])
+        projection2 = project_vector_to_plane(normal, pose2[:3, 2])
 
         print 'world projection1: ', projection1.transpose()
         print 'world projection2: ', projection2.transpose()
@@ -41,18 +39,17 @@ class TestNormalReconstruction(unittest.TestCase):
         projection1 = pose1[:3, :3].transpose().dot(projection1)
         projection2 = pose2[:3, :3].transpose().dot(projection2)
 
-        self.assertLess(math.fabs(projection1[2, 0]), 1e-6)
-        self.assertLess(math.fabs(projection2[2, 0]), 1e-6)
+        self.assertLess(math.fabs(projection1[2]), 1e-6)
+        self.assertLess(math.fabs(projection2[2]), 1e-6)
 
-        azimuth1 = math.atan2(projection1[1, 0], projection1[0, 0])
-        azimuth2 = math.atan2(projection2[1, 0], projection2[0, 0])
+        azimuth1 = math.atan2(projection1[1], projection1[0])
+        azimuth2 = math.atan2(projection2[1], projection2[0])
 
         normal_eval = triangulate_azimuth(azimuth1, pose1, azimuth2, pose2)
-        normal_eval = np.resize(normal_eval, (3, 1))
-
-        print 'normal: ', normal.transpose()
-        print 'normal eval: ', normal_eval.transpose()
-
+        
+        print 'normal: ', normal
+        print 'normal eval: ', normal_eval
+        print normal - normal_eval
         self.assertLess( np.linalg.norm(normal - normal_eval), 1e-6 )
         
 
