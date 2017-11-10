@@ -17,6 +17,10 @@ from OpenGL.arrays import vbo
 
 from GLZPR import GLZPR, _demo_draw
 
+# fraction of max depth we are allowed to err to say there is correspondence
+DEPTH_ERROR_THRESHOLD = 0.1
+# magnitude of normal as fraction of max depth
+NORMAL_LENGTH = 0.05
 def read_depth_img(path):
     with open(path, 'rb') as f:
         f.readline()
@@ -45,6 +49,9 @@ def read_azimuth_img(path):
 	print(array.shape)
 	print(np.amax(array))
 	return array
+
+def angle_normalize(angle):
+	return math.atan2(math.sin(angle), math.cos(angle))
 
 def list_to_transformation_pose(list_pose):
 	T = np.resize(list_pose, (4, 4))
@@ -100,15 +107,19 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1,
 	Calculates normal for points based on depth image and azimuth image
 	optimally projects to a third image to find normal reprojection error
 	'''
+	global DEPTH_ERROR_THRESHOLD
+
 	max_depth = float(np.amax(depth_img1))
 	T_21 = np.linalg.inv(pose2).dot(pose1)
-	# T_21 = pose2.dot(np.linalg.inv(pose1))
-
 	T_12 = np.linalg.inv(T_21)
+
+	if pose3 is not None:
+		T_31 = np.linalg.inv(pose3).dot(pose3)
+		T_13 = np.linalg.inv(T_31)
+
 	width = depth_img1.shape[1]
 	height = depth_img1.shape[0]
 
-	num_overlap = 0
 	pointcloud = []
 	normals = []
 
@@ -141,13 +152,11 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1,
 			# in the first camera frame
 			xyz2_gt = transform(T_12, xyz2_gt)
 			
-			if math.fabs(d2 - xyz2[2]) > max_depth * 0.1:
+			if math.fabs(d2 - xyz2[2]) > max_depth * DEPTH_ERROR_THRESHOLD:
 				continue
 
-			pointcloud.append(xyz1)
-
-			if row % 15 or col % 15:
-				continue
+			if pose3 is None:
+				pointcloud.append(xyz1)
 
 			azimuth1 = azimuth_img1[row, col]
 			azimuth2 = azimuth_img2[v, u]
@@ -157,8 +166,10 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1,
 			normal_start = xyz1
 			normal_end = np.array(xyz1) + normal*max_depth*0.05
 
-			normals.append(normal_start)
-			normals.append(normal_end)
+			if pose3 is None:
+				if not (row % 15 or col % 15):
+					normals.append(normal_start)
+					normals.append(normal_end)
 			
 			projection1 = project_vector_to_plane(normal, (0, 0, 1)) #(normal[0], normal[1], 0)
 			azimuth_img1_reprojected[row, col] = math.fabs(math.atan2(projection1[1], projection1[0])-math.pi)
@@ -168,8 +179,39 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1,
 			projection2 = T_21[:3, :3].dot(projection2)
 			azimuth_img2_reprojected[v, u] = math.fabs(math.atan2(projection2[1], projection2[0])-math.pi)
 			azimuth_img2_original[row, col] = math.fabs(azimuth_img2[row, col]-math.pi)
-			
-			num_overlap += 1
+
+			if pose3 is not None:
+				xyz3 = transform(T_31, xyz1)
+				u3, v3 = threeD_to_image(xyz3, intrinsics)
+				if u3 < 0 or u3 >= width or v3 < 0 or v3 >= height:
+					continue
+				d3 = depth_img3[v3, u3]
+
+				if math.fabs(d3 - xyz3[2]) > max_depth * DEPTH_ERROR_THRESHOLD:
+					continue
+
+				pointcloud.append(xyz1)
+				
+				normal_start = xyz1
+				normal_end = np.array(xyz1) + normal*max_depth*0.05
+
+				projection3 = project_vector_to_plane(normal, T_13[:3, 2:3])
+				projection3 = T_31[:3, :3].dot(projection3)
+
+				azimuth_projected = math.fabs(math.atan2(projection3[1], projection3[0])-math.pi)
+				azimuth_actual = math.fabs(azimuth_img3[v3, u3] - math.pi)
+
+				# normalize
+				azimuth_projected = math.fabs(angle_normalize(azimuth_projected))
+				azimuth_actual = math.fabs(angle_normalize(azimuth_actual))
+
+				reprojection_error_img[v3, u3] = math.fabs(azimuth_actual - azimuth_projected)
+
+				if not (row % 15 or col % 15):
+					normals.append(normal_start)
+					normals.append(normal_end)
+				# else:
+				# 	continue
 
 	# cv2.imwrite(
 	# 	'original1.png', 
@@ -188,7 +230,13 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1,
 	# 	cv2.applyColorMap(np.uint8(azimuth_img2_reprojected/math.pi*255), cv2.COLORMAP_JET)
 	# )
 
-	print num_overlap
+	max_error = np.amax(reprojection_error_img)
+	print 'max_error: ', max_error
+	cv2.imwrite(
+		'reprojection_error.png', 
+		cv2.applyColorMap(np.uint8(reprojection_error_img/max_error*255), cv2.COLORMAP_JET)
+	)
+
 	return pointcloud, normals
 
 def triangulate_azimuth(azimuth1, pose1, azimuth2, pose2):
@@ -289,20 +337,31 @@ if __name__ == '__main__':
 	trajectory = read_trajectory(os.path.join(base_path, 'keyframes.json'))
 	pose1 = trajectory[img1_num]
 	pose2 = trajectory[img2_num]
+	if img3_num >= 0:
+		pose3 = trajectory[img3_num]
 
 	print pose1
 	print pose2
+	print pose3
 
 	with open(os.path.join(base_path, 'parameter.json')) as f:
 		config = json.load(f)
 
 	intrinsics = config['cam_intrinsic_param']
 
-	pointcloud, normals = compute_point_cloud_with_normal(
+	if img3_num >= 0:
+		pointcloud, normals = compute_point_cloud_with_normal(
 		depth_img1, azimuth_img1, pose1,
 		depth_img2, azimuth_img2, pose2,
-		intrinsics
+		intrinsics,
+		depth_img3, azimuth_img3, pose3
 	)
+	else:
+		pointcloud, normals = compute_point_cloud_with_normal(
+			depth_img1, azimuth_img1, pose1,
+			depth_img2, azimuth_img2, pose2,
+			intrinsics
+		)
 	save_point_cloud(pointcloud, 'pointcloud.off')
 
 	# pointcloud1 = depth_to_pointcloud(depth_img1, intrinsics)
