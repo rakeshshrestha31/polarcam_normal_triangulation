@@ -110,23 +110,20 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 
 	num_overlap = 0
 	pointcloud = []
+	normals = []
 
-	for row in range(depth_img1.shape[0]):
-		for col in range(depth_img1.shape[1]):
+	for row in range(0, depth_img1.shape[0], 10):
+		for col in range(0, depth_img1.shape[1], 10):
 			d1 = float(depth_img1[row, col])
 			
 			if (d1 < (max_depth * 0.1)):
 				continue
 			xyz1 = image_to_3d(col, row, d1, intrinsics)
 			
-			# debug
-			pointcloud.append(xyz1)
-			continue
 			# project and find out if there is overlap
 			xyz2 = transform(T_21, xyz1)
 			u, v = threeD_to_image(xyz2, intrinsics)
 			
-
 			# print xyz2, xyz2_gt			
 			if u < 0 or u >= width or v < 0 or v >= height:
 				continue
@@ -134,39 +131,27 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 			d2 = float(depth_img2[v, u])
 			xyz2_gt = image_to_3d(u, v, d2, intrinsics)
 			# in the first camera frame
-			# xyzw2_gt = T_12.dot(xyz2_gt + (1,))
-			# xyz2_gt = xyzw2[:3]
-
-			# if math.fabs(d2 - xyz2[2]) > max_depth * 0.2:
-			# 	continue
-
-			# print xyz2, xyz2_gt
-
-			# pointcloud.append(xyz2_gt)
+			xyz2_gt = transform(T_12, xyz2_gt)
 			
-			pointcloud.append(xyz2)		
-			pointcloud.append(xyz2_gt)
+			if math.fabs(d2 - xyz2[2]) > max_depth * 0.1:
+				continue
+
+			azimuth1 = azimuth_img1[row, col]
+			azimuth2 = azimuth_img2[v, u]
+			normal = triangulate_azimuth(azimuth1, np.eye(4), azimuth2, T_12)
+			normal = np.resize(normal, (3,));
+
+			normal_start = xyz1
+			normal_end = np.array(xyz1) + normal*max_depth*0.05
+
+			normals.append(normal_start)
+			normals.append(normal_end)
+
+			pointcloud.append(xyz1)		
+			
 			num_overlap += 1
-
-	for row in range(depth_img2.shape[0]):
-		for col in range(depth_img2.shape[1]):
-			d2 = float(depth_img2[row, col])
-			
-			if (d2 < (max_depth * 0.1)):
-				continue	
-
-			xyz2 = image_to_3d(col, row, d2, intrinsics)
-			
-			#debug
-			pointcloud.append(transform(T_12, xyz2))
-			continue
-
-			# project and find out if there is overlap
-			xyzw2_world = pose2.dot(np.resize(xyzw2, (4, 1)))
-			pointcloud.append(xyzw2_world[:3].transpose()[0])	
-
 	print num_overlap
-	return pointcloud
+	return pointcloud, normals
 
 def triangulate_azimuth(azimuth1, pose1, azimuth2, pose2):
 	'''
@@ -194,20 +179,26 @@ def triangulate_azimuth(azimuth1, pose1, azimuth2, pose2):
 
 	return point_normal/np.linalg.norm(point_normal)
 		
-index_positions = None
+vertex_indices = None
 vertex_positions = None
 
+normal_indices = None
+normal_positions = None
+
 def draw_point_cloud(event):
-	global index_positions, vertex_positions
+	global vertex_indices, vertex_positions
 
 	glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
-	
-	# glEnableVertexAttribArray(0);
-	# glVertexAttribPointer(0, 3, GL_FLOAT, False, 0, None)
 
-	# glDrawElements(GL_POINTS, len(pointcloud), GL_UNSIGNED_INT, None)
+	glPushMatrix() 
+	glMultMatrixf(np.array([
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, 1, 0,
+		0, 0, 0, 1
+	], dtype='f'))
 
-	index_positions.bind()
+	vertex_indices.bind()
   	vertex_positions.bind()
   	glEnableVertexAttribArray(0) # from 'location = 0' in shader
   	glVertexAttribPointer(0, 3, GL_FLOAT, False, 0, None)
@@ -215,10 +206,13 @@ def draw_point_cloud(event):
   	glBindVertexArray(0)
   	vertex_positions.unbind()
 
-	# glBegin(GL_POINTS);
-	# for point in pointcloud:
-	# 	glVertex3f(point[0], point[1], point[2])
-	# glEnd()
+  	normal_indices.bind()
+  	normal_positions.bind()
+  	glEnableVertexAttribArray(0)
+	glVertexAttribPointer(0, 3, GL_FLOAT, False, 0, None)
+	glDrawElements(GL_LINES, len(normals), GL_UNSIGNED_INT, None)
+
+	glPopMatrix()
 
 def save_point_cloud(pointcloud, filename):
 	with open(filename, 'w') as f:
@@ -260,7 +254,7 @@ if __name__ == '__main__':
 
 	intrinsics = config['cam_intrinsic_param']
 
-	pointcloud = compute_point_cloud_with_normal(
+	pointcloud, normals = compute_point_cloud_with_normal(
 		depth_img1, azimuth_img1, pose1,
 		depth_img2, azimuth_img2, pose2,
 		intrinsics
@@ -289,7 +283,10 @@ if __name__ == '__main__':
 	# cv2.imshow('azimuth_img', im_color)
 
 	vertex_positions = vbo.VBO(np.array(pointcloud, dtype='f'))
-	index_positions = vbo.VBO(np.array([i for i in range(len(pointcloud))], dtype=np.int32), target=GL_ELEMENT_ARRAY_BUFFER)
+	vertex_indices = vbo.VBO(np.array([i for i in range(len(pointcloud))], dtype=np.int32), target=GL_ELEMENT_ARRAY_BUFFER)
+
+	normal_positions = vbo.VBO(np.array(normals, dtype='f'))
+	normal_indices = vbo.VBO(np.array([(i, i+1) for i in range(0, len(normals), 2)], dtype=np.int32), target=GL_ELEMENT_ARRAY_BUFFER)
 
 	import sys
 	glutInit(sys.argv)
@@ -302,7 +299,16 @@ if __name__ == '__main__':
 	window.add(vbox)
 	zpr = GLZPR()
 	zpr.draw = draw_point_cloud
-	# zpr.draw = functools.partial(draw_point_cloud, pointcloud)
 	vbox.pack_start(zpr,True,True)
+
+	light_ambient = np.array([0.2, 0.2, 0.2, 1.0], dtype='f')
+	glEnable(GL_LIGHTING);
+	glEnable(GL_NORMALIZE)
+	
+	# glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient)
+	glLightModelfv(GL_LIGHT_MODEL_AMBIENT, light_ambient);
+	
+
+	
 	window.show_all()
 	gtk.main()

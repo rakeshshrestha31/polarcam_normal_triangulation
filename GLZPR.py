@@ -101,10 +101,10 @@ class GLZPR(gtkgl.DrawingArea):
             glLoadIdentity()
          
     def init(self):
-        glLightfv(GL_LIGHT0,GL_AMBIENT, (0.,0.,0.,1.))
+        glLightfv(GL_LIGHT0,GL_AMBIENT, (1.,1.,1.,1.))
         glLightfv(GL_LIGHT0,GL_DIFFUSE, (1.,1.,1.,1.))
         glLightfv(GL_LIGHT0,GL_SPECULAR,(1.,1.,1.,1.))
-        glLightfv(GL_LIGHT0,GL_POSITION,(1.,1.,1.,0.))
+        glLightfv(GL_LIGHT0,GL_POSITION,(1.,-1.,1.,0.))
         glMaterialfv(GL_FRONT,GL_AMBIENT, (.7,.7,.7,1.))
         glMaterialfv(GL_FRONT,GL_DIFFUSE, (.8,.8,.8,1.))
         glMaterialfv(GL_FRONT,GL_SPECULAR,(1.,1.,1.,1.))
