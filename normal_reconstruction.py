@@ -11,6 +11,10 @@ import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
+from OpenGL.raw.GL.ARB.vertex_array_object import glGenVertexArrays, \
+                                                  glBindVertexArray
+from OpenGL.arrays import vbo
+
 from GLZPR import GLZPR, _demo_draw
 
 def read_depth_img(path):
@@ -190,13 +194,31 @@ def triangulate_azimuth(azimuth1, pose1, azimuth2, pose2):
 
 	return point_normal/np.linalg.norm(point_normal)
 		
-def draw_point_cloud(pointcloud, event):
+index_positions = None
+vertex_positions = None
+
+def draw_point_cloud(event):
+	global index_positions, vertex_positions
+
 	glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
 	
-	glBegin(GL_POINTS);
-	for point in pointcloud:
-		glVertex3f(point[0], point[1], point[2])
-	glEnd()
+	# glEnableVertexAttribArray(0);
+	# glVertexAttribPointer(0, 3, GL_FLOAT, False, 0, None)
+
+	# glDrawElements(GL_POINTS, len(pointcloud), GL_UNSIGNED_INT, None)
+
+	index_positions.bind()
+  	vertex_positions.bind()
+  	glEnableVertexAttribArray(0) # from 'location = 0' in shader
+  	glVertexAttribPointer(0, 3, GL_FLOAT, False, 0, None)
+  	glDrawElements(GL_POINTS, len(pointcloud), GL_UNSIGNED_INT, None)
+  	glBindVertexArray(0)
+  	vertex_positions.unbind()
+
+	# glBegin(GL_POINTS);
+	# for point in pointcloud:
+	# 	glVertex3f(point[0], point[1], point[2])
+	# glEnd()
 
 def save_point_cloud(pointcloud, filename):
 	with open(filename, 'w') as f:
@@ -261,12 +283,14 @@ if __name__ == '__main__':
 
 	# cv.waitKey()
 
-	exit(0)
+	# exit(0)
 
 	# im_color = cv2.applyColorMap(np.uint8(azimuth_img/math.pi*255), cv2.COLORMAP_JET)
 	# cv2.imshow('azimuth_img', im_color)
-		
-	
+
+	vertex_positions = vbo.VBO(np.array(pointcloud, dtype='f'))
+	index_positions = vbo.VBO(np.array([i for i in range(len(pointcloud))], dtype=np.int32), target=GL_ELEMENT_ARRAY_BUFFER)
+
 	import sys
 	glutInit(sys.argv)
 	gtk.gdk.threads_init()
@@ -277,7 +301,8 @@ if __name__ == '__main__':
 	vbox = gtk.VBox(False, 0)
 	window.add(vbox)
 	zpr = GLZPR()
-	zpr.draw = functools.partial(draw_point_cloud, pointcloud)
+	zpr.draw = draw_point_cloud
+	# zpr.draw = functools.partial(draw_point_cloud, pointcloud)
 	vbox.pack_start(zpr,True,True)
 	window.show_all()
 	gtk.main()
