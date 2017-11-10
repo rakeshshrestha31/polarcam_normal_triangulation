@@ -93,9 +93,12 @@ def depth_to_pointcloud(depth_img, intrinsics):
 				points.append(image_to_3d(col, row, d, intrinsics))
 	return points
 
-def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2, azimuth_img2, pose2, intrinsics):
+def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, 
+									depth_img2, azimuth_img2, pose2, intrinsics,
+									depth_img3=None, azimuth_img3=None, pose3=None):
 	'''
 	Calculates normal for points based on depth image and azimuth image
+	optimally projects to a third image to find normal reprojection error
 	'''
 	max_depth = float(np.amax(depth_img1))
 	T_21 = np.linalg.inv(pose2).dot(pose1)
@@ -114,6 +117,8 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 
 	azimuth_img1_original = np.zeros((height, width), dtype='f')
 	azimuth_img2_original = np.zeros((height, width), dtype='f')
+
+	reprojection_error_img = np.zeros((height, width), dtype='f')
 
 	for row in range(0, depth_img1.shape[0]):
 		for col in range(0, depth_img1.shape[1]):
@@ -155,7 +160,7 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 			normals.append(normal_start)
 			normals.append(normal_end)
 			
-			projection1 = (normal[0], normal[1], 0)
+			projection1 = project_vector_to_plane(normal, (0, 0, 1)) #(normal[0], normal[1], 0)
 			azimuth_img1_reprojected[row, col] = math.fabs(math.atan2(projection1[1], projection1[0])-math.pi)
 			azimuth_img1_original[row, col] = math.fabs(azimuth_img1[row, col]-math.pi)
 
@@ -256,16 +261,18 @@ def save_point_cloud(pointcloud, filename):
 
 
 if __name__ == '__main__':
-	base_path = '/home/rakesh/workspace/polar_cam/fish_vase_zp'
 	import sys, os
-	if len(sys.argv) < 3:
-		print('Usage: python normal_reconstruction.py <img1_num> <img2_num>')
+	if len(sys.argv) < 4:
+		print('Usage: python normal_reconstruction.py <base_path> <img1_num> <img2_num> [<img3_num]')
 		exit(0)
-	img1_num = int(sys.argv[1])
-	img2_num = int(sys.argv[2])
+	base_path = sys.argv[1]
+	img1_num = int(sys.argv[2])
+	img2_num = int(sys.argv[3])
+	img3_num = int(sys.argv[3]) if len(sys.argv) >= 5 else -1
 
 	img1_str = "%.4d" % img1_num
 	img2_str = "%.4d" % img2_num
+	img3_str = "%.4d" % img3_num if img3_num >= 0 else ""
 
 	print img1_str, img2_str
 
@@ -275,14 +282,18 @@ if __name__ == '__main__':
 	azimuth_img2 = read_azimuth_img(os.path.join(base_path, 'az', img2_str + '.bin'))
 	depth_img2, max_depth2 = read_depth_img(os.path.join(base_path, 'depth', img2_str + '.pgm'))
 
-	trajectory = read_trajectory('/home/rakesh/workspace/polar_cam/fish_vase_zp/keyframes.json')
+	if (img3_num >= 0):
+		azimuth_img3 = read_azimuth_img(os.path.join(base_path, 'az', img3_str + '.bin'))
+		depth_img3, max_depth3 = read_depth_img(os.path.join(base_path, 'depth', img3_str + '.pgm'))
+
+	trajectory = read_trajectory(os.path.join(base_path, 'keyframes.json'))
 	pose1 = trajectory[img1_num]
 	pose2 = trajectory[img2_num]
 
 	print pose1
 	print pose2
 
-	with open('/home/rakesh/workspace/polar_cam/fish_vase_zp/parameter.json') as f:
+	with open(os.path.join(base_path, 'parameter.json')) as f:
 		config = json.load(f)
 
 	intrinsics = config['cam_intrinsic_param']
