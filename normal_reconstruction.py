@@ -115,8 +115,8 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 	azimuth_img1_original = np.zeros((height, width), dtype='f')
 	azimuth_img2_original = np.zeros((height, width), dtype='f')
 
-	for row in range(0, depth_img1.shape[0], 10):
-		for col in range(0, depth_img1.shape[1], 10):
+	for row in range(0, depth_img1.shape[0]):
+		for col in range(0, depth_img1.shape[1]):
 			d1 = float(depth_img1[row, col])
 			
 			if (d1 < (max_depth * 0.1)):
@@ -139,6 +139,11 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 			if math.fabs(d2 - xyz2[2]) > max_depth * 0.1:
 				continue
 
+			pointcloud.append(xyz1)
+
+			if row % 15 or col % 15:
+				continue
+
 			azimuth1 = azimuth_img1[row, col]
 			azimuth2 = azimuth_img2[v, u]
 			normal = triangulate_azimuth(azimuth1, np.eye(4), azimuth2, T_12)
@@ -149,8 +154,7 @@ def compute_point_cloud_with_normal(depth_img1, azimuth_img1, pose1, depth_img2,
 
 			normals.append(normal_start)
 			normals.append(normal_end)
-			pointcloud.append(xyz1)
-
+			
 			projection1 = (normal[0], normal[1], 0)
 			azimuth_img1_reprojected[row, col] = math.fabs(math.atan2(projection1[1], projection1[0])-math.pi)
 			azimuth_img1_original[row, col] = math.fabs(azimuth_img1[row, col]-math.pi)
@@ -203,7 +207,7 @@ def triangulate_azimuth(azimuth1, pose1, azimuth2, pose2):
 	point_normal = np.cross(cross1, cross2)
 
 	# make sure that the normal is in the right side
-	if np.dot(point_normal, pose1[:3, 2]) < 0:
+	if np.dot(point_normal, pose1[:3, 2]) > 0:
 		point_normal *= -1
 
 	return point_normal/np.linalg.norm(point_normal)
