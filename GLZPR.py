@@ -215,7 +215,7 @@ class GLZPR(gtkgl.DrawingArea):
         right = self.get_right_button_down(event)
         self._mouseRotate = left and not (middle or right)
         self._mouseZoom = middle or (left and right)
-        self._mousePan = right and self.event_masked(event,gdk.CONTROL_MASK)
+        self._mousePan = right # and self.event_masked(event,gdk.CONTROL_MASK)
         x = self._mouseX = event.x
         y = self._mouseY = event.y
         self._dragPosX, self._dragPosY, self._dragPosZ = self._pos(x,y)
